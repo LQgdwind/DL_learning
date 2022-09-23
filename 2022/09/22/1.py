@@ -52,4 +52,51 @@ class RNN(torch.nn.Module):
     #   __call__方法可以让对象类似于函数一样被调用
     #   有点像cpp中重载类的()运算符。
 
-    
+# pytorch 使用torch.nn.lstm()实现长短记忆模型
+# 输入的参数列表包括:
+# input_size 输入数据的特征维数，通常就是embedding_dim(词向量的维度)
+# hidden_size　LSTM中隐层的维度
+# num_layers　循环神经网络的层数
+# bias　用不用偏置，default=True
+# batch_first 这个要注意，通常我们输入的数据shape=(batch_size,seq_length,embedding_dim),而batch_first默认是False,所以我们的输入数据最好送进LSTM之前将batch_size与seq_length这两个维度调换
+# dropout　默认是0，代表不用dropout
+# bidirectional默认是false，代表不用双向LSTM
+
+
+# 输入数据
+input_tensor = torch.randn(10,32,20)
+hidden_tensor_prev = torch.randn(5,32,50)
+cell_tensor_prev = torch.randn(5,32,50)
+
+# 输入张量与状态张量与RNN的含义大致相同,cell与hidden的形状相同
+# input就是shape=(seq_length,batch_size,input_size)的张量
+# h_0是shape=(num_layers*num_directions,batch_size,hidden_size)的张量，它包含了在当前这个batch_size中每个句子的初始隐藏状态。其中num_layers就是LSTM的层数。如果bidirectional=True,num_directions=2,否则就是１，表示只有一个方向。
+# c_0和h_0的形状相同，它包含的是在当前这个batch_size中的每个句子的初始细胞状态。h_0,c_0如果不提供，那么默认是０。
+
+# 输出数据
+# __call__方法有两个返回值:output,(h_n,c_n):
+# output的shape=(seq_length,batch_size,num_directions*hidden_size),
+# 它包含的是LSTM的最后一时间步的输出特征(h_t),ｔ是batch_size中每个句子的长度。
+# h_n.shape==(num_directions * num_layers,batch,hidden_size)
+# c_n.shape==h_n.shape
+# h_n包含的是句子的最后一个单词（也就是最后一个时间步）的隐藏状态，c_n包含的是句子的最后一个单词的细胞状态，所以它们都与句子的长度seq_length无关。
+# output[-1]与h_n是相等的，因为output[-1]包含的正是batch_size个句子中每一个句子的最后一个单词的隐藏状态，注意LSTM中的隐藏状态其实就是输出，cell state细胞状态才是LSTM中一直隐藏的，记录着信息
+
+net = torch.nn.LSTM(input_size=20,
+                    hidden_size=50,
+                    num_layers=5)
+output, tuple = net(input_tensor, (hidden_tensor_prev, cell_tensor_prev))
+print(net)
+print("output")
+print(output.size())
+print("hn")
+print(tuple[0].size())
+print("on")
+print(tuple[1].size())
+# 输出数据包括output,(h_n,c_n):
+# output的shape=(seq_length,batch_size,num_directions*hidden_size),
+# 它包含的是LSTM的最后一时间步的输出特征(h_t),ｔ是batch_size中每个句子的长度。
+# h_n.shape==(num_directions * num_layers,batch,hidden_size)
+# c_n.shape==h_n.shape
+# h_n包含的是句子的最后一个单词（也就是最后一个时间步）的隐藏状态，c_n包含的是句子的最后一个单词的细胞状态，所以它们都与句子的长度seq_length无关。
+# output[-1]与h_n是相等的，因为output[-1]包含的正是batch_size个句子中每一个句子的最后一个单词的隐藏状态，注意LSTM中的隐藏状态其实就是输出，cell state细胞状态才是LSTM中一直隐藏的，记录着信息
