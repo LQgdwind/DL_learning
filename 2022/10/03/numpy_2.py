@@ -71,3 +71,8 @@ print(np.insert(m,[0,2],n,axis=1))
 
 # append操作，只能在末尾操作
 print(np.append(m,np.zeros((3,2)),axis=1))
+
+# 对于更高维度的matrix，操作也类似
+o = np.linspace(1,16,16,endpoint=True).reshape((2,4,2)).astype(np.float64)
+print(o)
+
