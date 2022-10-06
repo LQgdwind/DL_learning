@@ -1,3 +1,5 @@
+# 从零开始实现正则化技术
+
 import numpy as np
 import torch
 import torchvision
@@ -12,7 +14,7 @@ train_iter = d2l.load_array(train_data, batch_size)
 test_data = d2l.synthetic_data(true_w,true_b,n_test)
 test_iter = d2l.load_array(test_data, batch_size, is_train=False)
 
-# 从零开始实现正则化技术
+
 
 def init_params():
     """初始化模型参数"""
