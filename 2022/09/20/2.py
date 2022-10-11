@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 
 x = np.linspace(start=0,
                 stop=20,
@@ -26,3 +27,34 @@ y = x*5 + 7 + noise
 df = pd.DataFrame()
 df['x'] = x
 df['y'] = y
+
+
+learning_rate, epochs = 0.05, 400
+model = Linear(in_features=1,
+               out_features=1)
+criterion = MSELoss()
+trainer = SGD(model.parameters(),
+              lr=learning_rate)
+x_train = x.reshape(-1, 1).astype('float32')
+y_train = y.reshape(-1, 1).astype('float32')
+# 使用astype的原因是为了在下述训练过程中直接实现tensor转换。
+for epoch in range(epochs):
+    inputs = torch.from_numpy(x_train)
+    labels = torch.from_numpy(y_train)
+    outputs = model(inputs)
+    loss = criterion(outputs,labels)
+    trainer.zero_grad()
+    loss.backward()
+    trainer.step()
+    if epoch % 2 == 0:
+        print('epoch {},loss {:1.4f}'.format(epoch,loss.data.item()))
+        predicted = model.forward(torch.from_numpy(x_train)).data.numpy()
+        plt.plot(x_train, y_train, 'go', label='data', alpha=0.3)
+        # 'go' 'g'表示绿色 'o'表示点形为圆
+        plt.plot(x_train, predicted, label='predicted', alpha=1)
+        plt.legend()
+        # 显示图例，图例中的内容由label定义
+        plt.show()
+        time.sleep(0.5)
+
+
