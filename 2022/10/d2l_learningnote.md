@@ -1,3 +1,5 @@
+
+
 # d2l learning note
 
 ## Chapter 1 绪论
@@ -418,6 +420,130 @@ class MLP(nn.Module):
 	def forward(self, X):
 # 注意，这⾥我们使⽤ReLU的函数版本，其在nn.functional模块中定义。
 		return self.out(F.relu(self.hidden(X)))
+```
+
+
+
+现在我们可以更仔细地看看Sequential类是如何⼯作的，回想⼀下Sequential的设计是为了把其他模块串起来。为了构建我们⾃⼰的简化的MySequential，我们只需要定义两个关键函数：
+
+1. ⼀种将块逐个追加到列表中的函数。
+
+2. ⼀种前向传播函数，⽤于将输⼊按追加块的顺序传递给块组成的“链条”。下⾯的MySequential类提供了与默认Sequential类相同的功能。
+
+```python3
+class MySequential(nn.Module):
+	def __init__(self, *args):
+		super().__init__()
+		for idx, module in enumerate(args):
+			# 这⾥，module是Module⼦类的⼀个实例。我们把它保存在'Module'类的成员
+			# 变量_modules中。module的类型是OrderedDict
+			self._modules[str(idx)] = module
+	def forward(self, X):
+		# OrderedDict保证了按照成员添加的顺序遍历它们
+		for block in self._modules.values():
+			X = block(X)
+		return X
+```
+
+
+
+
+
+到⽬前为⽌，我们⽹络中的所有操作都对⽹络的激活值及⽹络的参数起作⽤。然⽽，有时我们可能希望合并既不是上⼀层的结果也不是可更新参数的项，我们称之为常数参数（constant parameter）。
+
+例如，我们需要⼀个计算函数 *f*(**x**, **w**) = *c* *·* **w**<sup>⊤</sup>**x**的层，其中**x**是输⼊，**w**是参数，c是某个在优化过程中没有更新的指定常量。
+
+因此我们实现了⼀个FixedHiddenMLP类，如下所⽰：
+
+```python3
+class FixedHiddenMLP(nn.Module):
+	def __init__(self):
+		super().__init__()
+		# 不计算梯度的随机权重参数。因此其在训练期间保持不变
+		self.rand_weight = torch.rand((20, 20), requires_grad=False)
+		self.linear = nn.Linear(20, 20)
+	def forward(self, X):
+		X = self.linear(X)
+		# 使⽤创建的常量参数以及relu和mm函数
+		X = F.relu(torch.mm(X, self.rand_weight) + 1) # 复⽤全连接层。这相当于两个全连接层共享参数
+		X = self.linear(X)
+		# 控制流
+		while X.abs().sum() > 1: #L1范数
+            X /= 2
+		return X.sum()
+```
+
+
+
+### Chapter 5.2 参数管理
+
+**参数访问**
+
+我们从已有模型中访问参数。当通过Sequential类定义模型时，我们可以通过索引来访问模型的任意层。这就像模型是⼀个列表⼀样，每层的参数都在其属性中。如下所⽰，我们可以检查第⼆个全连接层的参数。
+
+```python3
+print(net[2].state_dict())
+
+# OrderedDict([('weight', tensor([[ 0.0743, 0.1876, 0.0571, 0.3447, 0.3483, -0.2867, 0.3273, -0.1527]])), ('bias', tensor([0.1162]))])
+```
+
+下⾯的代码从第⼆个全连接层（即第三个神经⽹络层）提取偏置，提取后返回的是⼀个参数类实例，并进⼀步访问该参数的值。
+
+```python3
+print(type(net[2].bias))
+print(net[2].bias)
+print(net[2].bias.data)
+
+# <class 'torch.nn.parameter.Parameter'>
+# Parameter containing:
+# tensor([0.1162], requires_grad=True)
+# tensor([0.1162])
+```
+
+同样的我们可以访问梯度
+
+```python3
+net[2].weight.grad == None
+```
+
+
+
+**参数初始化**
+
+内置初始化
+
+```python3
+net = nn.Sequential(nn.Linear(4, 8), nn.ReLU(), nn.Linear(8, 1))
+# 偏置矩阵存的是转置之前的矩阵，与Linear形状刚好相反 比如net[0].weight的形状就是(8,4) 
+# 原因很显然 要把输入的特征数4变成输出的特征数8，必须进行8次线性变换得到8个特征。
+def init_normal(m):
+	if type(m) == nn.Linear:
+		nn.init.normal_(m.weight, mean=0, std=0.01)
+		nn.init.zeros_(m.bias)
+net.apply(init_normal)
+print(net[0].weight.data[0], net[0].bias.data[0])
+
+def init_constant(m):
+	if type(m) == nn.Linear:
+		nn.init.constant_(m.weight, 1)
+		nn.init.zeros_(m.bias)
+net.apply(init_constant)
+print(net[0].weight.data[0], net[0].bias.data[0])
+
+# 我们可以对某些块运用不同的初始化办法
+def xavier(m):
+	if type(m) == nn.Linear:
+		nn.init.xavier_uniform_(m.weight)
+def init_42(m):
+	if type(m) == nn.Linear:
+		nn.init.constant_(m.weight, 42)
+
+net[0].apply(xavier)
+net[2].apply(init_42)
+print(net[0].weight.data[0])
+print(net[2].weight.data)
+# tensor([-0.3261, -0.5587, 0.0063, -0.3914])
+# tensor([[42., 42., 42., 42., 42., 42., 42., 42.]])
 ```
 
 
