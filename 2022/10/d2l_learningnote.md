@@ -548,3 +548,147 @@ print(net[2].weight.data)
 
 
 
+参数绑定
+
+```python3
+# 我们需要给共享层⼀个名称，以便可以引⽤它的参数
+shared = nn.Linear(8, 8)
+net = nn.Sequential(nn.Linear(4, 8), nn.ReLU(),
+shared, nn.ReLU(),
+shared, nn.ReLU(),
+nn.Linear(8, 1))
+net(X)
+# 检查参数是否相同
+print(net[2].weight.data[0] == net[4].weight.data[0])
+net[2].weight.data[0, 0] = 100
+# 确保它们实际上是同⼀个对象，⽽不只是有相同的值
+print(net[2].weight.data[0] == net[4].weight.data[0])
+
+# tensor([True, True, True, True, True, True, True, True])
+# tensor([True, True, True, True, True, True, True, True])
+```
+
+这个例⼦表明第三个和第五个神经⽹络层的参数是绑定的。它们不仅值相等，⽽且由相同的张量表⽰。
+
+因此，如果我们改变其中⼀个参数，另⼀个参数也会改变。你可能会思考：当参数绑定时，梯度会发⽣什么情况？
+
+答案是由于模型参数包含梯度，因此在反向传播期间第⼆个隐藏层（即第三个神经⽹络层）和第三个隐藏层（即第五个神经⽹络层）的梯度会加在⼀起。
+
+### Chapter 5.3 延后初始化
+
+### Chapter 5.4 自定义层
+
+```python3
+class MyLinear(nn.Module):
+	def __init__(self, in_units, units):
+		super().__init__()
+		self.weight = nn.Parameter(torch.randn(in_units, units))
+		self.bias = nn.Parameter(torch.randn(units,))
+	def forward(self, X):
+		linear = torch.matmul(X, self.weight.data) + self.bias.data
+		return F.relu(linear)
+```
+
+我们还可以使⽤⾃定义层构建模型，就像使⽤内置的全连接层⼀样使⽤⾃定义层。
+
+```python3
+net = nn.Sequential(MyLinear(64, 8), MyLinear(8, 1))
+net(torch.rand(2, 64))
+```
+
+### Chapter 5.5 读写文件
+
+对于单个张量，我们可以直接调⽤load和save函数分别读写它们。这两个函数都要求我们提供⼀个名称，save要求将要保存的变量作为输⼊。
+
+```python3
+import torch
+from torch import nn
+from torch.nn import functional as F x = torch.arange(4)
+torch.save(x, 'x-file')
+x2 = torch.load('x-file')
+print(x2)
+```
+
+保存单个权重向量（或其他张量）确实有⽤，但是如果我们想保存整个模型，并在以后加载它们，单独保存每个向量则会变得很⿇烦。毕竟，我们可能有数百个参数散布在各处。因此，深度学习框架提供了内置函数来保存和加载整个⽹络。需要注意的⼀个重要细节是，这将保存模型的参数⽽不是保存整个模型。
+
+```python3
+class MLP(nn.Module):
+def __init__(self):
+super().__init__()
+self.hidden = nn.Linear(20, 256)
+self.output = nn.Linear(256, 10)
+def forward(self, x):
+return self.output(F.relu(self.hidden(x)))
+net = MLP()
+X = torch.randn(size=(2, 20))
+Y = net(X)
+
+torch.save(net.state_dict(), 'mlp.params')
+
+clone = MLP()
+clone.load_state_dict(torch.load('mlp.params'))
+print(clone.eval())
+```
+
+由于两个实例具有相同的模型参数，在输⼊相同的X时，两个实例的计算结果应该相同。
+
+
+
+### Chapter 5.6 GPU
+
+
+
+## Chapter 6 卷积神经网络
+
+卷积神经⽹络（convolutional neural network，CNN）是⼀类强⼤的、为处理图像数据⽽设计的神经⽹络。CNN利⽤先验知识，即利⽤相近像素之间的相互关联性，从图像数据中学习得到有效的模型。基于卷积神经⽹络架构的模型在计算机视觉领域中已经占主导地位，当今⼏乎所有的图像识别、⽬标检测或语义分割相关的学术竞赛和商业应⽤都以这种⽅法为基础。
+
+现代卷积神经⽹络的设计得益于⽣物学、群论和⼀系列的补充实验。卷积神经⽹络需要的参数少于全连接架构的⽹络，⽽且卷积也很容易⽤GPU并⾏计算。因此卷积神经⽹络除了能够⾼效地采样从⽽获得精确的模型，还能够⾼效地计算。
+
+
+
+### Chapter 6.1 从全连接层到卷积
+
+相比于FC(fully connected layer)，卷积神经⽹络正是将空间不变性（spatial invariance）的这⼀概念系统化，从⽽基于这个模型使⽤较少的参数来学习有⽤的表⽰。
+
+1. 平移不变性（translation invariance）：不管检测对象出现在图像中的哪个位置，神经⽹络的前⾯⼏层应该对相同的图像区域具有相似的反应，即为“平移不变性”。
+
+2. 局部性（locality）：神经⽹络的前⾯⼏层应该只探索输⼊图像中的局部区域，⽽不过度在意图像中相隔较远区域的关系，这就是“局部性”原则。最终，可以聚合这些局部特征，以在整个图像级别进⾏预测。
+
+
+
+在深度学习研究社区中，**V**被称为卷积核（convolution kernel）或者滤波器（filter），亦或简单地称之为该卷积层的权重，通常该权重是可学习的参数。
+
+当图像处理的局部区域很⼩时，卷积神经⽹络与多层感知机的训练差异可能是巨⼤的：以前，多层感知机可能需要数⼗亿个参数来表⽰⽹络中的⼀层，⽽现在卷积神经⽹络通常只需要⼏百个参数，⽽且不需要改变输⼊或隐藏表⽰的维数。参数⼤幅减少的代价是，我们的特征现在是平移不变的，并且当确定每个隐藏活性值时，每⼀层只包含局部的信息。
+
+以上所有的权重学习都将依赖于归纳偏置。当这种偏置与现实相符时，我们就能得到样本有效的模型，并且这些模型能很好地泛化到未知数据中。
+
+但如果这偏置与现实不符时，⽐如当图像不满⾜平移不变时，我们的模型可能难以拟合我们的训练数据。
+
+
+
+然⽽这种⽅法有⼀个问题：我们忽略了图像⼀般包含三个通道/三种原⾊（红⾊、绿⾊和蓝⾊）。
+
+实际上，图像不是⼆维张量，⽽是⼀个由⾼度、宽度和颜⾊组成的三维张量，⽐如包含1024 *×* 1024 *×* 3个像素。
+
+前两个轴与像素的空间位置有关，⽽第三个轴可以看作是每个像素的多维表⽰。因此，我们将X索引为[X]<sub>*i,j,k*</sub>。由此卷积相应地调整为[V]<sub>*a,b,c*</sub>，⽽不是[**V**]<sub>*a,b*</sub>。此外，由于输⼊图像是三维的，我们的隐藏表⽰H也最好采⽤三维张量。换句话说，对于每⼀个空间位置，我们想要采⽤⼀组⽽不是⼀个隐藏表⽰。这样⼀组隐藏表⽰可以想象成⼀些互相堆叠的⼆维⽹格。因此，我们可以把隐藏表⽰想象为⼀系列具有⼆维张量的通道（channel）。这些通道有时也被称为特征映射（feature maps），因为每个通道都向后续层提供⼀组空间化的学习特征。直观上你可以想象在靠近输⼊的底层，⼀些通道专⻔识别边缘，⽽⼀些通道专⻔识别纹理。为了⽀持输⼊X和隐藏表⽰H中的多个通道，我们可以在V中添加第四个坐标，即[V]<sub>*a,b,c,d*</sub>。
+
+
+
+综上所述，卷积层需要学习的参数比全连接层少得多，**对于平面图像，卷积核通常是四维的，分别是输入通道a，输出通道b，卷积核size:c*d。**
+
+令卷积核的个数n
+
+需要训练的参数量为 **n*a*b*c*d**
+
+
+
+### Chapter 6.2 图像卷积
+
+### Chapter 6.3 填充(padding)和步幅(stride)
+
+### Chapter 6.4 多输入多输出通道
+
+### Chapter 6.5 汇聚层(池化层)
+
+### Chapter 6.6 Lenet简介
+
