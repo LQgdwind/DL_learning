@@ -859,3 +859,300 @@ epoch 10, loss 0.154
 
 ### Chapter 7.1 深度卷积神经⽹络（**AlexNet**）
 
+AlexNet由⼋层组成：五个卷积层、两个全连接隐藏层和⼀个全连接输出层。
+
+```python3
+import torch
+from torch import nn
+from d2l import torch as d2l
+net = nn.Sequential(
+	# 这⾥，我们使⽤⼀个11*11的更⼤窗⼝来捕捉对象。
+	# 同时，步幅为4，以减少输出的⾼度和宽度。
+	# 另外，输出通道的数⽬远⼤于LeNet
+	nn.Conv2d(1, 96, kernel_size=11, stride=4, padding=1), nn.ReLU(),
+	nn.MaxPool2d(kernel_size=3, stride=2),
+	# 减⼩卷积窗⼝，使⽤填充为2来使得输⼊与输出的⾼和宽⼀致，且增⼤输出通道数
+	nn.Conv2d(96, 256, kernel_size=5, padding=2), nn.ReLU(),
+	nn.MaxPool2d(kernel_size=3, stride=2),
+	# 使⽤三个连续的卷积层和较⼩的卷积窗⼝。
+	# 除了最后的卷积层，输出通道的数量进⼀步增加。
+	# 在前两个卷积层之后，汇聚层不⽤于减少输⼊的⾼度和宽度
+	nn.Conv2d(256, 384, kernel_size=3, padding=1), nn.ReLU(),
+	nn.Conv2d(384, 384, kernel_size=3, padding=1), nn.ReLU(),
+	nn.Conv2d(384, 256, kernel_size=3, padding=1), nn.ReLU(),
+	nn.MaxPool2d(kernel_size=3, stride=2),
+	nn.Flatten(),
+	# 这⾥，全连接层的输出数量是LeNet中的好⼏倍。使⽤dropout层来减轻过拟合
+	nn.Linear(6400, 4096), nn.ReLU(),
+	nn.Dropout(p=0.5),
+	nn.Linear(4096, 4096), nn.ReLU(),
+	nn.Dropout(p=0.5),
+	# 最后是输出层。由于这⾥使⽤Fashion-MNIST，所以⽤类别数为10，⽽⾮论⽂中的1000
+	nn.Linear(4096, 10))
+```
+
+
+
+### Chapter 7.2 使用块的网络(VGG)
+
+经典卷积神经⽹络的基本组成部分是下⾯的这个序列：
+
+1. 带填充以保持分辨率的卷积层；
+
+2. ⾮线性激活函数，如ReLU；
+
+3. 汇聚层，如最⼤汇聚层。
+
+⽽⼀个VGG块与之类似，由⼀系列卷积层组成，后⾯再加上⽤于空间下采样的最⼤汇聚层。在最初的VGG论⽂中，作者使⽤了带有3 *×* 3卷积核、填充为1（保持⾼度和宽度）的卷积层，=和带有2 *×* 2汇聚窗⼝、步幅为2（每个块后的分辨率减半）的最⼤汇聚层。在下⾯的代码中，我们定义了⼀个名为vgg_block的函数来实现⼀个VGG块。
+
+该函数有三个参数，分别对应于卷积层的数量num_convs、输⼊通道的数量in_channels 和输出通道的数量out_channels.
+
+```python3
+import torch
+from torch import nn
+from d2l import torch as d2l
+def vgg_block(num_convs, in_channels, out_channels):
+	layers = []
+	for _ in range(num_convs):
+		layers.append(nn.Conv2d(in_channels, out_channels,kernel_size=3, padding=1))
+		layers.append(nn.ReLU())
+		in_channels = out_channels
+	layers.append(nn.MaxPool2d(kernel_size=2,stride=2))
+	return nn.Sequential(*layers)
+```
+
+与AlexNet、LeNet⼀样，VGG⽹络可以分为两部分：第⼀部分主要由卷积层和汇聚层组成，第⼆部分由全连接层组成。
+
+原始VGG⽹络有5个卷积块，其中前两个块各有⼀个卷积层，后三个块各包含两个卷积层。第⼀个模块有64个输出通道，每个后续模块将输出通道数量翻倍，直到该数字达到512。由于该⽹络使⽤8个卷积层和3个全连接层，因此它通常被称为VGG-11。
+
+```python3
+conv_arch = ((1, 64), (1, 128), (2, 256), (2, 512), (2, 512))
+
+def vgg(conv_arch):
+	conv_blks = []
+	in_channels = 1 # 卷积层部分
+	for (num_convs, out_channels) in conv_arch:
+		conv_blks.append(vgg_block(num_convs, in_channels, out_channels))
+		in_channels = out_channels
+	return nn.Sequential(
+		*conv_blks, nn.Flatten(),
+		# 全连接层部分
+		nn.Linear(out_channels * 7 * 7, 4096), nn.ReLU(), nn.Dropout(0.5),
+		nn.Linear(4096, 4096), nn.ReLU(), nn.Dropout(0.5),
+		nn.Linear(4096, 10))
+    
+net = vgg(conv_arch)
+```
+
+总结：
+
+1. VGG-11使⽤可复⽤的卷积块构造⽹络。不同的VGG模型可通过每个块中卷积层数量和输出通道数量的差异来定义。
+
+2. 块的使⽤导致⽹络定义的⾮常简洁。使⽤块可以有效地设计复杂的⽹络。
+
+3. 在VGG论⽂中，Simonyan和Ziserman尝试了各种架构。特别是他们发现深层且窄的卷积（即3 *×* 3）⽐较浅层且宽的卷积更有效。
+
+
+
+### Chapter 7.3 网络中的网络(NiN)
+
+LeNet、AlexNet和VGG都有⼀个共同的设计模式：通过⼀系列的卷积层与汇聚层来提取空间结构特征；然后通过全连接层对特征的表征进⾏处理。AlexNet和VGG对LeNet的改进主要在于如何扩⼤和加深这两个模块。或者，可以想象在这个过程的早期使⽤全连接层。然⽽，如果使⽤了全连接层，可能会完全放弃表征的空间结构。⽹络中的⽹络（*NiN*）提供了⼀个⾮常简单的解决⽅案：在每个像素的通道上分别使⽤多层感知机。
+
+卷积层的输⼊和输出由四维张量组成，张量的每个轴分别对应样本、通道、⾼度和宽度。另外，全连接层的输⼊和输出通常是分别对应于样本和特征的⼆维张量。NiN的想法是在每个像素位置（针对每个⾼度和宽度）应⽤⼀个全连接层。如果我们将权重连接到每个空间位置，我们可以将其视为1 *×* 1卷积层，或作为在每个像素位置上独⽴作⽤的全连接层。从另⼀个⻆度看，即将空间维度中的每个像素视为单个样本，将通道维度视为不同特征（feature）。
+
+NiN块以⼀个普通卷积层开始，后⾯是两个1 *×* 1的卷积层。这两个1 *×* 1卷积层充当带有ReLU激活函数的逐像素全连接层。第⼀层的卷积窗⼝形状通常由⽤⼾设置。随后的卷积窗⼝形状固定为1 *×* 1。
+
+```python3
+import torch
+from torch import nn
+from d2l import torch as d2l
+def nin_block(in_channels, out_channels, kernel_size, strides, padding):
+	return nn.Sequential(
+		nn.Conv2d(in_channels, out_channels, kernel_size, strides, padding),
+		nn.ReLU(),
+		nn.Conv2d(out_channels, out_channels, kernel_size=1), nn.ReLU(),
+		nn.Conv2d(out_channels, out_channels, kernel_size=1), nn.ReLU())
+
+net = nn.Sequential(
+	nin_block(1, 96, kernel_size=11, strides=4, padding=0),
+	nn.MaxPool2d(3, stride=2),
+	nin_block(96, 256, kernel_size=5, strides=1, padding=2),
+	nn.MaxPool2d(3, stride=2),
+	nin_block(256, 384, kernel_size=3, strides=1, padding=1),
+	nn.MaxPool2d(3, stride=2),
+	nn.Dropout(0.5),
+	# 标签类别数是10
+	nin_block(384, 10, kernel_size=3, strides=1, padding=1),
+	nn.AdaptiveAvgPool2d((1, 1)),
+	# 将四维的输出转成⼆维的输出，其形状为(批量⼤⼩,10)
+	nn.Flatten())
+```
+
+
+
+总结：
+
+1. NiN使⽤由⼀个卷积层和多个1 *×* 1卷积层组成的块。该块可以在卷积神经⽹络中使⽤，以允许更多的每像素⾮线性。
+
+2. NiN去除了容易造成过拟合的全连接层，将它们替换为全局平均汇聚层（即在所有位置上进⾏求和）。该汇聚层通道数量为所需的输出数量（例如，Fashion-MNIST的输出为10）。
+
+3. 移除全连接层可减少过拟合，同时显著减少NiN的参数。
+
+4. NiN的设计影响了许多后续卷积神经⽹络的设计。、
+
+
+
+### Chapter 7.4 并行连结的网络(GoogLeNet)
+
+在GoogLeNet中，基本的卷积块被称为*Inception*块（Inception block）。
+
+Inception块由四条并⾏路径组成。前三条路径使⽤窗⼝⼤⼩为1 *×* 1、3 *×* 3和5 *×* 5的卷积层，从不同空间⼤⼩中提取信息。中间的两条路径在输⼊上执⾏1 *×* 1卷积，以减少通道数，从⽽降低模型的复杂性。第四条路径使⽤3 *×* 3最⼤汇聚层，然后使⽤1 *×* 1卷积层来改变通道数。这四条路径都使⽤合适的填充来使输⼊与输出的⾼和宽⼀致，最后我们将每条线路的输出在通道维度上连结，并构成Inception块的输出。在Inception块中，通常调整的超参数是每层输出通道数。
+
+```python3
+class Inception(nn.Module):
+# c1--c4是每条路径的输出通道数
+	def __init__(self, in_channels, c1, c2, c3, c4, **kwargs):
+		super(Inception, self).__init__(**kwargs)
+		# 线路1，单1x1卷积层
+		self.p1_1 = nn.Conv2d(in_channels, c1, kernel_size=1) # 线路2，1x1卷积层后接3x3卷积层
+		self.p2_1 = nn.Conv2d(in_channels, c2[0], kernel_size=1)
+		self.p2_2 = nn.Conv2d(c2[0], c2[1], kernel_size=3, padding=1) # 线路3，1x1卷积层后接5x5卷积层
+		self.p3_1 = nn.Conv2d(in_channels, c3[0], kernel_size=1)
+		self.p3_2 = nn.Conv2d(c3[0], c3[1], kernel_size=5, padding=2) # 线路4，3x3最⼤汇聚层后接1x1卷积层
+		self.p4_1 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+		self.p4_2 = nn.Conv2d(in_channels, c4, kernel_size=1)
+	def forward(self, x):
+		p1 = F.relu(self.p1_1(x))
+		p2 = F.relu(self.p2_2(F.relu(self.p2_1(x))))
+		p3 = F.relu(self.p3_2(F.relu(self.p3_1(x))))
+		p4 = F.relu(self.p4_2(self.p4_1(x)))
+		# 在通道维度上连结输出
+		return torch.cat((p1, p2, p3, p4), dim=1)
+    
+```
+
+为什么GoogLeNet这个⽹络如此有效呢？⾸先我们考虑⼀下滤波器（filter）的组合，它们可以⽤各种滤波器尺⼨探索图像，这意味着不同⼤⼩的滤波器可以有效地识别不同范围的图像细节。同时，我们可以为不同的滤波器分配不同数量的参数。
+
+GoogLeNet⼀共使⽤9个Inception块和全局平均汇聚层的堆叠来⽣成其估计值。Inception块之间的最⼤汇聚层可降低维度。第⼀个模块类似于AlexNet和LeNet，Inception块的组合从VGG继承，全局平均汇聚层避免了在最后使⽤全连接层。
+
+现在，我们逐⼀实现GoogLeNet的每个模块。
+
+第⼀个模块使⽤64个通道、7 *×* 7卷积层。
+
+```python3
+b1 = nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),
+		nn.ReLU(),
+		nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+第⼆个模块使⽤两个卷积层：第⼀个卷积层是64个通道、1 *×* 1卷积层；第⼆个卷积层使⽤将通道数量增加三倍的3 *×* 3卷积层。这对应于Inception块中的第⼆条路径。
+
+```python3
+b2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=1),
+		nn.ReLU(),
+		nn.Conv2d(64, 192, kernel_size=3, padding=1),
+		nn.ReLU(),
+		nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+第三个模块串联两个完整的Inception块。第⼀个Inception块的输出通道数为64 + 128 + 32 + 32 = 256，四个路径之间的输出通道数量⽐为64 : 128 : 32 : 32 = 2 : 4 : 1 : 1。第⼆个和第三个路径⾸先将输⼊通道的数量分别减少到96/192 = 1/2和16/192 = 1/12，然后连接第⼆个卷积层。第⼆个Inception块的输出通道数增加到128 + 192 + 96 + 64 = 480，四个路径之间的输出通道数量⽐为128 : 192 : 96 : 64 = 4 : 6 : 3 : 2。第⼆条和第三条路径⾸先将输⼊通道的数量分别减少到128/256 = 1/2和32/256 = 1/8。
+
+```python3
+b3 = nn.Sequential(Inception(192, 64, (96, 128), (16, 32), 32),
+		Inception(256, 128, (128, 192), (32, 96), 64),
+		nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+第四模块更加复杂，它串联了5个Inception块，其输出通道数分别是192 + 208 + 48 + 64 = 512、160 + 224 +64 + 64 = 512、128 + 256 + 64 + 64 = 512、112 + 288 + 64 + 64 = 528和256 + 320 + 128 + 128 = 832。这些路径的通道数分配和第三模块中的类似，⾸先是含3×3卷积层的第⼆条路径输出最多通道，其次是仅含1×1卷积层的第⼀条路径，之后是含5×5卷积层的第三条路径和含3×3最⼤汇聚层的第四条路径。其中第⼆、第三条路径都会先按⽐例减⼩通道数。这些⽐例在各个Inception块中都略有不同。
+
+```python3
+b4 = nn.Sequential(Inception(480, 192, (96, 208), (16, 48), 64),
+		Inception(512, 160, (112, 224), (24, 64), 64),
+		Inception(512, 128, (128, 256), (24, 64), 64),
+		Inception(512, 112, (144, 288), (32, 64), 64),
+		Inception(528, 256, (160, 320), (32, 128), 128),
+		nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+第五模块包含输出通道数为256 + 320 + 128 + 128 = 832和384 + 384 + 128 + 128 = 1024的两个Inception块。其中每条路径通道数的分配思路和第三、第四模块中的⼀致，只是在具体数值上有所不同。需要注意的是，第五模块的后⾯紧跟输出层，该模块同NiN⼀样使⽤全局平均汇聚层，将每个通道的⾼和宽变成1。最后我们将输出变成⼆维数组，再接上⼀个输出个数为标签类别数的全连接层。
+
+```python3
+b5 = nn.Sequential(Inception(832, 256, (160, 320), (32, 128), 128),
+		Inception(832, 384, (192, 384), (48, 128), 128),
+		nn.AdaptiveAvgPool2d((1,1)),
+        # 全局平均汇聚层
+		nn.Flatten())
+
+net = nn.Sequential(b1, b2, b3, b4, b5, nn.Linear(1024, 10))
+```
+
+
+
+总结：
+
+1.  Inception块相当于⼀个有4条路径的⼦⽹络。它通过不同窗⼝形状的卷积层和最⼤汇聚层来并⾏抽取信息，并使⽤1×1卷积层减少每像素级别上的通道维数从⽽降低模型复杂度。
+
+2.  GoogLeNet将多个设计精细的Inception块与其他层（卷积层、全连接层）串联起来。其中Inception块的通道数分配之⽐是在ImageNet数据集上通过⼤量的实验得来的。
+
+3. GoogLeNet和它的后继者们⼀度是ImageNet上最有效的模型之⼀：它以较低的计算复杂度提供了类似的测试精度。
+
+
+
+### Chapter 7.5 批量规范化(BatchNormalizaton)
+
+批量规范化（batch normalization），这是⼀种流⾏且有效的技术，可持续加速深层⽹络的收敛速度。
+
+再结合残差块，批量规范化使得研究⼈员能够训练100层以上的⽹络。
+
+
+
+批量规范化应⽤于单个可选层（也可以应⽤到所有层），其原理如下：在每次训练迭代中，我们⾸先规范化输⼊，即通过减去其均值并除以其标准差，其中两者均基于当前⼩批量处理。接下来，我们应⽤⽐例系数和⽐例偏移。正是由于这个基于批量统计的标准化，才有了批量规范化的名称。
+
+请注意，如果我们尝试使⽤⼤⼩为1的⼩批量应⽤批量规范化，我们将⽆法学到任何东西。这是因为在减去均值之后，每个隐藏单元将为0。所以，只有使⽤⾜够⼤的⼩批量，批量规范化这种⽅法才是有效且稳定的。请注意，在应⽤批量规范化时，批量⼤⼩的选择可能⽐没有批量规范化时更重要。
+
+请注意，我们在⽅差估计值中添加⼀个⼩的常量*ϵ >* 0，以确保我们永远不会尝试除以零。批量规范化层在”训练模式“（通过⼩批量统计数据规范化）和“预测模式”（通过数据集统计规范化）中的功能不同。在训练过程中，我们⽆法得知使⽤整个数据集来估计平均值和⽅差，所以只能根据每个⼩批次的平均值和⽅差不断训练模型。⽽在预测模式下，可以根据整个数据集精确计算批量规范化所需的平均值和⽅差。
+
+批量规范化和其他层之间的⼀个关键区别是，由于批量规范化在完整的⼩批量上运⾏，因此我们不能像以前在引⼊其他层时那样忽略批量⼤⼩。我们在下⾯讨论这两种情况：全连接层和卷积层，他们的批量规范化实现略有不同。
+
+
+
+对于全连接层：
+
+我们在特征维度axis=0上面做批量规范化。
+
+对于卷积层：
+
+卷积层的数据可以表示为四维矩阵(批量大小，通道，特征图长，特征图宽)，我们在axis=2也就是通道上做批量规范化，也就是说一个通道的所有批量进行平均值和方差的计算。因此，在计算平均值和⽅差时，我们会收集所有空间位置的值，然后在给定通道内应⽤相同的均值和⽅差，以便在每个空间位置对值进⾏规范化。
+
+举个例子：
+
+如果 min-batch sizes 为 m，那么网络某一层输入数据可以表示为四维矩阵(m,f,w,h)，m 为 min-batch sizes，f 为特征图个数，w、h 分别为特征图的宽高。在 CNN 中我们可以把每个特征图看成是一个特征处理（一个神经元），因此在使用 Batch Normalization，mini-batch size 的大小就是：m*w*h，于是对于每个特征图都只有一对可学习参数：γ、β。
+
+我们可以调用nn库函数来方便实现BN：
+
+```python3
+nn.BatchNorm2d(上一个卷积层的输出通道数通道数)
+# 实现卷积层的BN
+nn.BatchNorm1d(上一个fc的输出特征数)
+# 实现fc的BN
+```
+
+总结:
+
+1. 在模型训练过程中，批量规范化利⽤⼩批量的均值和标准差，不断调整神经⽹络的中间输出，使整个神
+
+经⽹络各层的中间输出值更加稳定。
+
+2. 批量规范化在全连接层和卷积层的使⽤略有不同。
+
+3. 批量规范化层和暂退层⼀样，在训练模式和预测模式下计算不同。
+
+4. 批量规范化有许多有益的副作⽤，主要是正则化。另⼀⽅⾯，”减少内部协变量偏移“的原始动机似乎
+
+不是⼀个有效的解释。
+
+
+
+### Chapter 7.6 残差网络(Resnet)
+
+### Chapter 7.7 稠密连接网络(DenseNet)
