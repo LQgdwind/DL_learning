@@ -1147,12 +1147,234 @@ nn.BatchNorm1d(上一个fc的输出特征数)
 
 3. 批量规范化层和暂退层⼀样，在训练模式和预测模式下计算不同。
 
-4. 批量规范化有许多有益的副作⽤，主要是正则化。另⼀⽅⾯，”减少内部协变量偏移“的原始动机似乎
-
-不是⼀个有效的解释。
+4. 批量规范化有许多有益的副作⽤，主要是正则化。另⼀⽅⾯，”减少内部协变量偏移“的原始动机似乎不是⼀个有效的解释。
 
 
 
 ### Chapter 7.6 残差网络(Resnet)
 
+一般来说，神经网络的深度不应该太深，否则会出现梯度消失和梯度爆炸的情况。loss值在减小到一定程度后，随着训练的增加甚至会反弹。
+
+对于误差的链式反向传播，一旦其中某一个导数很小，多次连乘后梯度可能越来越小。对于深层网络，梯度传到浅层几乎就没了。
+
+使用残差网络，相当于每一个导数加上了一个恒等项1。此时，就算原来的导数很小，误差仍然能够有效的反向传播。
+
+
+
+残差⽹络的核⼼思想是：每个附加层都应该更容易地包含原始函数作为其元素之⼀。
+
+
+
+ResNet沿⽤了VGG完整的3 *×* 3卷积层设计。残差块⾥⾸先有2个有相同输出通道数的3 *×* 3卷积层。每个卷积层后接⼀个批量规范化层和ReLU激活函数。然后我们通过跨层数据通路，跳过这2个卷积运算，将输⼊直接加在最后的ReLU激活函数前。这样的设计要求2个卷积层的输出与输⼊形状⼀样，从⽽使它们可以相加。如果想改变通道数，就需要引⼊⼀个额外的1 *×* 1卷积层来将输⼊变换成需要的形状后再做相加运算。
+
+```python3
+import torch
+from torch import nn
+from torch.nn import functional as F
+from d2l import torch as d2l
+class Residual(nn.Module): #@save
+	def __init__(self, input_channels, num_channels,
+		use_1x1conv=False, strides=1):
+        super().__init__()
+		self.conv1 = nn.Conv2d(input_channels, num_channels,kernel_size=3, padding=1, stride=strides)
+		self.conv2 = nn.Conv2d(num_channels, num_channels,kernel_size=3, padding=1)
+		if use_1x1conv:
+			self.conv3 = nn.Conv2d(input_channels, num_channels,kernel_size=1, stride=strides)
+		else:
+			self.conv3 = None
+			self.bn1 = nn.BatchNorm2d(num_channels)
+			self.bn2 = nn.BatchNorm2d(num_channels)
+	def forward(self, X):
+		Y = F.relu(self.bn1(self.conv1(X)))
+		Y = self.bn2(self.conv2(Y))
+		if self.conv3:
+			X = self.conv3(X)
+		Y += X
+		return F.relu(Y)
+
+```
+
+此代码⽣成两种类型的⽹络：⼀种是当use_1x1conv=False时，应⽤ReLU⾮线性函数之前，将输⼊添加到输出。另⼀种是当use_1x1conv=True时，添加通过1 *×* 1卷积调整通道和分辨率。
+
+
+
+ResNet的前两层跟之前介绍的GoogLeNet中的⼀样：在输出通道数为64、步幅为2的7 *×* 7卷积层后，接步幅为2的3 *×* 3的最⼤汇聚层。不同之处在于ResNet每个卷积层后增加了批量规范化层。
+
+```python3
+b1 = nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),nn.BatchNorm2d(64), nn.ReLU(),
+nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+GoogLeNet在后⾯接了4个由Inception块组成的模块。ResNet则使⽤4个由残差块组成的模块，每个模块使⽤若⼲个同样输出通道数的残差块。第⼀个模块的通道数同输⼊通道数⼀致。由于之前已经使⽤了步幅为2的最⼤汇聚层，所以⽆须减⼩⾼和宽。之后的每个模块在第⼀个残差块⾥将上⼀个模块的通道数翻倍，并将⾼和宽减半。
+
+```python3
+def resnet_block(input_channels, num_channels, num_residuals,
+	first_block=False):
+	blk = []
+	for i in range(num_residuals):
+		if i == 0 and not first_block:
+			blk.append(Residual(input_channels, num_channels,
+			use_1x1conv=True, strides=2))
+		else:
+			blk.append(Residual(num_channels, num_channels))
+	return blk
+```
+
+接着在ResNet加⼊所有残差块，这⾥每个模块使⽤2个残差块。
+
+```python3
+b2 = nn.Sequential(*resnet_block(64, 64, 2, first_block=True))
+b3 = nn.Sequential(*resnet_block(64, 128, 2))
+b4 = nn.Sequential(*resnet_block(128, 256, 2))
+b5 = nn.Sequential(*resnet_block(256, 512, 2))
+```
+
+最后，与GoogLeNet⼀样，在ResNet中加⼊全局平均汇聚层，以及全连接层输出。
+
+```python3
+net = nn.Sequential(b1, b2, b3, b4, b5,nn.AdaptiveAvgPool2d((1,1)),nn.Flatten(), nn.Linear(512, 10))
+```
+
+每个模块有4个卷积层（不包括恒等映射的1 *×* 1卷积层）。加上第⼀个7 *×* 7卷积层和最后⼀个全连接层，共有18层。因此，这种模型通常被称为ResNet-18。
+
+
+
+总结
+
+1. 学习嵌套函数（nested function）是训练神经⽹络的理想情况。在深层神经⽹络中，学习另⼀层作为恒等映射（identity function）较容易（尽管这是⼀个极端情况）。
+
+2. 残差映射可以更容易地学习同⼀函数，例如将权重层中的参数近似为零。
+
+3. 利⽤残差块（residual blocks）可以训练出⼀个有效的深层神经⽹络：输⼊可以通过层间的残余连接更快地向前传播。
+
+4. 残差⽹络（ResNet）对随后的深层神经⽹络设计产⽣了深远影响。
+
 ### Chapter 7.7 稠密连接网络(DenseNet)
+
+ResNet极⼤地改变了如何参数化深层⽹络中函数的观点。稠密连接⽹络（DenseNet）在某种程度上是ResNet的逻辑扩展。
+
+ResNet和DenseNet的关键区别在于，DenseNet输出是连接⽽不是如ResNet的简单相加。
+
+DenseNet实现起来⾮常简单：我们不需要添加术语，⽽是将它们连接起来。DenseNet这个名字由变量之间的“稠密连接”⽽得来，最后⼀层与之前的所有层紧密相连。
+
+稠密⽹络主要由2部分构成：稠密块（dense block）和过渡层（transition layer）。前者定义如何连接输⼊和输出，⽽后者则控制通道数量，使其不会太复杂。
+
+DenseNet使⽤了ResNet改良版的“批量规范化、激活和卷积”架构。
+
+```python3
+def conv_block(input_channels, num_channels):
+	return nn.Sequential(nn.BatchNorm2d(input_channels), nn.ReLU(),nn.Conv2d(input_channels, num_channels, kernel_size=3, padding=1))
+```
+
+**稠密块**
+
+⼀个稠密块由多个卷积块组成，每个卷积块使⽤相同数量的输出通道。然⽽，在前向传播中，我们将每个卷积块的输⼊和输出在通道维上连结。
+
+```python3
+class DenseBlock(nn.Module):
+	def __init__(self, num_convs, input_channels, num_channels):
+		super(DenseBlock, self).__init__()
+		layer = []
+		for i in range(num_convs):
+			layer.append(conv_block(num_channels * i + input_channels, num_channels))
+		self.net = nn.Sequential(*layer)
+	def forward(self, X):
+		for blk in self.net:
+			Y = blk(X)
+			# 连接通道维度上每个块的输⼊和输出
+			X = torch.cat((X, Y), dim=1)
+		return X
+```
+
+**过渡层**
+
+由于每个稠密块都会带来通道数的增加，使⽤过多则会过于复杂化模型。⽽过渡层可以⽤来控制模型复杂度。它通过1 *×* 1卷积层来减⼩通道数，并使⽤步幅为2的平均汇聚层减半⾼和宽，从⽽进⼀步降低模型复杂度。
+
+```python3
+def transition_block(input_channels, num_channels):
+	return nn.Sequential(nn.BatchNorm2d(input_channels), 
+                         nn.ReLU(),
+                         nn.Conv2d(input_channels, num_channels, kernel_size=1),
+                         nn.AvgPool2d(kernel_size=2, stride=2))
+```
+
+**DenseNet模型**
+
+我们来构造DenseNet模型。DenseNet⾸先使⽤同ResNet⼀样的单卷积层和最⼤汇聚层。
+
+```python3
+b1 = nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),
+                   nn.BatchNorm2d(64),
+                   nn.ReLU(),
+                   nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+```
+
+接下来，类似于ResNet使⽤的4个残差块，DenseNet使⽤的是4个稠密块。与ResNet类似，我们可以设置每个稠密块使⽤多少个卷积层。这⾥我们设成4，从⽽与 ResNet-18保持⼀致。稠密块⾥的卷积层通道数（即增⻓率）设为32，所以每个稠密块将增加128个通道。
+
+在每个模块之间，ResNet通过步幅为2的残差块减⼩⾼和宽，DenseNet则使⽤过渡层来减半⾼和宽，并减半通道数。
+
+```python3
+# num_channels为当前的通道数
+num_channels, growth_rate = 64, 32
+num_convs_in_dense_blocks = [4, 4, 4, 4]
+blks = []
+for i, num_convs in enumerate(num_convs_in_dense_blocks):
+	blks.append(DenseBlock(num_convs, num_channels, growth_rate))
+	# 上⼀个稠密块的输出通道数
+	num_channels += num_convs * growth_rate
+	# 在稠密块之间添加⼀个转换层，使通道数量减半
+	if i != len(num_convs_in_dense_blocks) - 1:
+		blks.append(transition_block(num_channels, num_channels // 2))
+		num_channels = num_channels // 2
+```
+
+与ResNet类似，最后接上全局汇聚层和全连接层来输出结果。
+
+```python3
+net = nn.Sequential(b1, 
+                    *blks,
+                    nn.BatchNorm2d(num_channels), 
+                    nn.ReLU(),
+                    nn.AdaptiveAvgPool2d((1, 1)),
+                    nn.Flatten(),
+                    nn.Linear(num_channels, 10))
+```
+
+
+
+总结:
+
+1. 在跨层连接上，不同于ResNet中将输⼊与输出相加，稠密连接⽹络（DenseNet）在通道维上连结输⼊与输出。
+
+2. DenseNet的主要构建模块是稠密块和过渡层。
+
+3. 在构建DenseNet时，我们需要通过添加过渡层来控制⽹络的维数，从⽽再次减少通道的数量。
+
+## Chapter 13 计算机视觉
+
+### Chapter 13.1 图像增广
+
+### Chapter 13.2 微调
+
+### Chapter 13.3 目标检测和边界框
+
+### Chapter 13.4 锚框
+
+### Chapter 13.5 多尺度目标检测
+
+### Chapter 13.6 目标检测数据集
+
+### Chapter 13.7 单发多框检测
+
+### Chapter 13.8 区域卷积神经网络
+
+### Chapter 13.9 语义分割和数据集
+
+### Chapter 13.10 转置卷积
+
+### Chapter 13.11 全卷积网络
+
+### Chapter 13.12 风格迁移
+
+
+
